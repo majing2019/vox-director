@@ -6,17 +6,81 @@ so captions/watermark are rendered as images and composited with `overlay`).
 import os
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
 
+# Chinese fonts first for CJK support, fallback to Arial
 FONT_BOLD = [
+    "/System/Library/Fonts/STHeiti Medium.ttc",
     "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
     "/Library/Fonts/Arial Bold.ttf",
     "/System/Library/Fonts/Supplemental/Arial.ttf",
 ]
 FONT_REG = [
+    "/System/Library/Fonts/STHeiti Light.ttc",
     "/System/Library/Fonts/Supplemental/Arial.ttf",
     "/Library/Fonts/Arial.ttf",
 ]
 
 CAPTION_STYLES = ("white", "paper")
+
+
+def split_chinese_text(text, num_parts):
+    """Split Chinese text into balanced parts for multiple shots.
+    Tries to split by punctuation first, then by character count for balance."""
+    import re
+
+    if num_parts <= 1:
+        return [text]
+
+    # First try to split by punctuation
+    parts = re.split(r'([，。！？、；：])', text)
+    # Rejoin with punctuation
+    segments = []
+    current = ""
+    for i, part in enumerate(parts):
+        if re.match(r'[，。！？、；：]', part):
+            current += part
+            if current.strip():
+                segments.append(current.strip())
+            current = ""
+        else:
+            current += part
+
+    if current.strip():
+        segments.append(current.strip())
+
+    if len(segments) <= num_parts:
+        return segments
+
+    # If we have too many segments, combine them
+    target_chars = len(text) // num_parts
+    result = []
+    current_part = ""
+
+    for segment in segments:
+        if len(current_part) + len(segment) <= target_chars * 1.2:  # Allow 20% flexibility
+            current_part += segment
+        else:
+            if current_part:
+                result.append(current_part)
+            current_part = segment
+
+    if current_part:
+        result.append(current_part)
+
+    # Ensure we have exactly num_parts
+    while len(result) > num_parts:
+        # Merge last two parts
+        result[-2] = result[-2] + result[-1]
+        result.pop()
+
+    while len(result) < num_parts:
+        # Split the longest part
+        longest_idx = max(range(len(result)), key=lambda i: len(result[i]))
+        longest = result[longest_idx]
+        mid = len(longest) // 2
+        result[longest_idx] = longest[:mid]
+        result.insert(longest_idx + 1, longest[mid:])
+
+    return result
 
 
 def _font(paths, size):
@@ -27,17 +91,38 @@ def _font(paths, size):
 
 
 def _wrap(draw, text, fnt, max_w):
-    words, lines, cur = text.split(), [], ""
-    for w in words:
-        trial = f"{cur} {w}".strip()
-        if draw.textlength(trial, font=fnt) <= max_w:
-            cur = trial
-        else:
-            if cur:
-                lines.append(cur)
-            cur = w
-    if cur:
-        lines.append(cur)
+    """Smart text wrapping that handles both Chinese and English text."""
+    lines, cur = [], ""
+
+    # Check if text contains Chinese characters
+    has_chinese = any('一' <= char <= '鿿' for char in text)
+
+    if has_chinese:
+        # For Chinese text, wrap by characters
+        for char in text:
+            trial = cur + char
+            if draw.textlength(trial, font=fnt) <= max_w:
+                cur = trial
+            else:
+                if cur:
+                    lines.append(cur)
+                cur = char
+        if cur:
+            lines.append(cur)
+    else:
+        # For English text, wrap by words (original logic)
+        words = text.split()
+        for w in words:
+            trial = f"{cur} {w}".strip()
+            if draw.textlength(trial, font=fnt) <= max_w:
+                cur = trial
+            else:
+                if cur:
+                    lines.append(cur)
+                cur = w
+        if cur:
+            lines.append(cur)
+
     return lines
 
 
@@ -50,16 +135,18 @@ def accent_color(image_path, default=(214, 64, 42)):
     except Exception:
         return default
     best, best_score = None, -1.0
-    for count, (r, g, b) in (im.getcolors(80 * 80) or []):
-        mx, mn = max(r, g, b), min(r, g, b)
-        if mx == 0:
-            continue
-        sat, val = (mx - mn) / mx, mx / 255.0
-        if sat < 0.45 or val < 0.35 or val > 0.92:   # skip washed-out / too dark / too light
-            continue
-        score = sat * val * (count ** 0.3)
-        if score > best_score:
-            best, best_score = (r, g, b), score
+    colors = im.getcolors(80 * 80)
+    if colors:
+        for count, (r, g, b) in colors:
+            mx, mn = max(r, g, b), min(r, g, b)
+            if mx == 0:
+                continue
+            sat, val = (mx - mn) / mx, mx / 255.0
+            if sat < 0.45 or val < 0.35 or val > 0.92:   # skip washed-out / too dark / too light
+                continue
+            score = sat * val * (count ** 0.3)
+            if score > best_score:
+                best, best_score = (r, g, b), score
     return best or default
 
 
@@ -78,7 +165,14 @@ def render_caption(text, out_path, W=1920, H=1080, margin_v=None, accent=None, s
     fnt = _font(FONT_BOLD, size)
     img = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     d0 = ImageDraw.Draw(img)
-    lines = _wrap(d0, text, fnt, int(W * 0.8))
+
+    # Adjust max width for vertical video (9:16) to prevent text overflow
+    # For vertical video: use smaller width to ensure Chinese text fits properly
+    if H > W:  # vertical video (9:16)
+        max_w_ratio = 0.6  # 60% width for vertical video with Chinese text
+    else:  # horizontal video (16:9)
+        max_w_ratio = 0.8  # 80% width for horizontal video
+    lines = _wrap(d0, text, fnt, int(W * max_w_ratio))
     lh = int(size * 1.3)
     y0 = H - margin_v - lh * len(lines)
     # (x, y, text, width) per line

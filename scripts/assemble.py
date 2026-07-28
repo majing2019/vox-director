@@ -58,6 +58,7 @@ def run(project_dir):
     # ---- flatten shots into timed segments; track each beat's span ----
     segs = []          # {clip, dur}
     beat_spans = []    # {start, dur, beat}
+    shot_spans = []    # {start, dur, shot, beat} for per-shot captions
     t = 0.0
     for beat in beats:
         beat_start = t
@@ -69,7 +70,10 @@ def run(project_dir):
             durs[-1] += need - sum(durs)
         for s, d in zip(shot_list, durs):
             segs.append({"clip": s["clip_path"], "dur": round(d, 2)})
+            shot_start = t
             t += d
+            # Track shot timing for captions
+            shot_spans.append({"start": shot_start, "dur": round(d, 2), "shot": s, "beat": beat})
         beat_spans.append({"start": beat_start, "dur": round(t - beat_start, 2), "beat": beat})
     total = round(t, 2)
 
@@ -102,20 +106,31 @@ def run(project_dir):
     body = os.path.join(tmp, "body_silent.mp4")
     ff(["-f", "concat", "-safe", "0", "-i", listf, "-c", "copy", body])
 
-    # ---- 3) captions (per beat) + watermark PNGs ----
+    # ---- 3) captions (per shot with split text) + watermark PNGs ----
     captions_on = bool(doc.get("captions", True))  # "captions": false -> no burned-in captions
     cap_pngs = []
     if captions_on:
+        # Create captions per shot with intelligently split text
+        shot_count = 0
         for bs in beat_spans:
             beat = bs["beat"]
-            p = os.path.join(tmp, f"cap_{beat['id']}.png")
-            acc = None
-            if cap_style == "paper":              # only the paper style uses a per-beat keyline
-                kf = next((s["keyframe_path"] for s in (beat.get("shots") or [beat])
-                           if s.get("keyframe_path") and os.path.exists(s["keyframe_path"])), None)
-                acc = text_overlay.accent_color(kf) if kf else None
-            text_overlay.render_caption(beat["narration"], p, W, H, accent=acc, style=cap_style)
-            cap_pngs.append(p)
+            shots = list(shots_of(beat))
+            narration = beat["narration"]
+
+            # Split narration intelligently for the number of shots
+            text_parts = text_overlay.split_chinese_text(narration, len(shots))
+
+            for i, shot in enumerate(shots):
+                shot_count += 1
+                p = os.path.join(tmp, f"cap_{shot_count}.png")
+                acc = None
+                if cap_style == "paper":              # only the paper style uses a per-beat keyline
+                    kf = shot.get("keyframe_path")
+                    acc = text_overlay.accent_color(kf) if kf and os.path.exists(kf) else None
+                # Use the corresponding text part for this shot
+                text_part = text_parts[i] if i < len(text_parts) else text_parts[-1]
+                text_overlay.render_caption(text_part, p, W, H, accent=acc, style=cap_style)
+                cap_pngs.append(p)
     wm_png = text_overlay.render_watermark(wm_text, os.path.join(tmp, "wm.png"), W, H)
 
     # ---- 4) one pass: overlay captions+wm, mix per-beat narration, duck BGM ----
@@ -132,8 +147,9 @@ def run(project_dir):
     inputs += ["-i", doc["bgm_path"]]
 
     chain, prev = [], "[0:v]"
-    for i, bs in enumerate(beat_spans[:ncap]):
-        s, e = bs["start"] + 0.2, bs["start"] + bs["dur"] - 0.1
+    # Overlay captions per shot (more frequent updates than per beat)
+    for i, ss in enumerate(shot_spans[:ncap]):
+        s, e = ss["start"] + 0.2, ss["start"] + ss["dur"] - 0.1
         lbl = f"[v{i+1}]"
         chain.append(f"{prev}[{i+1}:v]overlay=0:0:enable='between(t,{s:.2f},{e:.2f})'{lbl}")
         prev = lbl
