@@ -84,7 +84,9 @@ Vox 拼贴的**样子**和**动效**是两件事、两步:
 
 5. **旁白 + 配乐。** `python3 scripts/audio.py out/<project>`
    用 **xai/tts-v1** 出单一音色旁白 + **minimax/music-2.6** 出器乐 BGM。**按主题+语种挑 `voice_id`**(别只用默认)—— 见 `references/voices.md`(5 个多语种 + ~66 个各语种母语音色,标了性别);默认 `leo`(男、纪录片感)。
-   (普通旁白**别用 seed-audio**,除非指定 speaker——见踩坑。)
+   要用**真人本人的声音**念旁白(C-roll 照片里的主体、品牌音色),把 `voice.clone_ref` 指向一段本地
+   音频样本——旁白会切到 seed-audio(`bytedance/seed-audio-1.0`)声音克隆,用锁定说话人 + 录音棚干净
+   的模板,时间轴照旧按段稳定(见踩坑:绝不要不带这个锁定就把裸旁白丢给 seed-audio)。
 
 6. **合成。** `python3 scripts/assemble.py out/<project>`
    ffmpeg:归一化 + 拼接所有镜头,单一旁白压在配乐下(ducking),按段烧字幕,加水印。
@@ -129,6 +131,33 @@ Vox 拼贴的**样子**和**动效**是两件事、两步:
    把每段生成的画面跟**原始**那段音频(而不是视频模型自己出的音频)对上,保证不管哪个模型
    处理了这段,口型都对得上;再把每段统一到同一画幅,拼接成 `final.mp4`。
 
+## C-roll 模式(一张照片 → 拼贴)
+
+第三种输入形态——"抠像卷"。A-roll 改造的是一段口播**视频**;B-roll 从一个主题生成全部画面;
+**C-roll 吃的是一张静态照片**(自拍、头像卡、产品图),把它锚进拼贴世界里:主体被抠成**摄影质感的
+贴纸**——绝不重绘——再用图像**编辑**模型围着它生成每段的海报,之后照常走动效阶段。当用户给的是一张
+照片 + 一个主题时走这条路:用自己的脸出镜的个人讲解片,或围绕真实产品图做的拼贴广告(两种都已
+验证,2026-07-17)。
+
+1. **分镜表。** 跟 B-roll 一样(`references/beat-layer.md`,同一个确认关口),外加 beats.json 里的
+   C-roll 字段:`"mode": "croll"`、`"anchor_photo"`、`"croll_subject"`(`portrait` | `product`),
+   以及 `subject_wardrobe`(portrait——把服装锁死,否则纸娃娃身体会飘)或 `subject_desc`(product)。
+   镜头要设 `"title": false`——C-roll 海报不带标题,文字交给字幕。如果没有单独的脚本,先把旁白
+   转录/推导出来,用音频的 ASR 时间戳来定段(音频优先,跟 A-roll 一样——不是 B-roll 那种文本优先)。
+
+2. **锚定关键帧。** `python3 scripts/croll_keyframes.py <project_dir>`
+   照片只上传一次,再通过 `google/nano-banana-2/edit`(备选 `openai/gpt-image-2/edit`)为每一镜生成
+   一张锚定海报。人物会得到摄影质感的脸 + 插画纸娃娃身体;产品会得到像素级忠实的贴纸、标签字体
+   原样保留。已经焊死在脚本里的 prompt 铁律(三条都是重跑一遍换来的):姿势/表情只能给**身体**——
+   要一个眨眼就会把脸重绘;半调网点必须限定在背景,否则会渗到皮肤上;人物的服装必须显式锁死。
+   脚本还会把 `anchor_freeze` 写回 beats.json。
+
+3. **动效 + 音频 + 合成。** 照常 `clips.py` → `audio.py` → `assemble.py`。`clips.py` 会把
+   `anchor_freeze` 护栏注入每一条运动 prompt——没有它,视频阶段会把产品标签重新拼字(实测:
+   "PARFUM" → "PAREUM")或者把脸重新对时。想让旁白用主体本人的声音,设 `voice.clone_ref`(见上面
+   的旁白 + 配乐);印章/急推的时间点从旁白的 ASR 词级时间戳推(`asr_beats.py` 对任意音频都能用,
+   不限 A-roll 素材)。
+
 ## beats.json schema
 
 ```json
@@ -146,10 +175,18 @@ Vox 拼贴的**样子**和**动效**是两件事、两步:
   "motion_style": "punchy",               // 幅度:calm | punchy | max(主题给默认)
   "constraints": "strict",                // strict = 开防缺陷护栏 | loose = 放开探索 + 抽卡
   "voice": {"voice_id": "leo", "language": "en", "speed": 1.0},  // 按主题/语种挑 —— 见 references/voices.md
+                                          // + 可选 "clone_ref": "path/to/sample.mp3"(用 seed-audio 克隆这个声音)
+                                          //   和 "persona": "YouTube tutorial creator"(克隆旁白的表演风格)
   "music": "epic cinematic orchestral, instrumental, no vocals",
   "mix": {"music": 0.6, "voice": 1.25},   // 音量平衡(可选;这是默认值,音乐在人声下自动让路)
   "caption_style": "white",               // white(默认:干净白字幕)| paper(奶油剪纸拼贴风)
+  "captions": true,                       // false = 不烧字幕(交干净成片,字幕留到后期上)
   "watermark": "Made with Atlas Cloud",
+  "mode": "croll",                        // 仅 C-roll —— 外加下面四个字段
+  "anchor_photo": "path/to/photo.png",    // C-roll:要锚定的静态图(人物或产品)
+  "croll_subject": "portrait",            // C-roll:portrait | product
+  "subject_wardrobe": "a cream knitted sweater and charcoal trousers",  // C-roll 人物:锁死服装
+  "subject_desc": "the perfume bottle",   // C-roll 产品:贴纸用的简短名词短语
   "beats": [
     {
       "id": 1, "title_cn": "", "title_en": "BEFORE MONEY",

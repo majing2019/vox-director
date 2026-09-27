@@ -18,14 +18,16 @@ https://github.com/user-attachments/assets/ed08d230-7bcb-4b48-a17d-23c079208f9f
 
 <table>
   <tr>
-    <td width="33%"><a href="https://github.com/user-attachments/assets/216cd62f-6314-456c-94cf-1090b8559a22"><img src="assets/thumbs/football.jpg" width="100%" alt="How football conquered the world"></a></td>
-    <td width="33%"><a href="https://github.com/user-attachments/assets/561788b1-5615-4828-b3f8-b24ae5ad7bcd"><img src="assets/thumbs/mexican.jpg" width="100%" alt="Mexican street food"></a></td>
-    <td width="33%"><a href="https://github.com/user-attachments/assets/f69f072f-f50a-41ba-9e66-7ed0aae4ddc0"><img src="assets/thumbs/money.jpg" width="100%" alt="A brief history of money"></a></td>
+    <td width="25%"><a href="https://github.com/user-attachments/assets/216cd62f-6314-456c-94cf-1090b8559a22"><img src="assets/thumbs/football.jpg" width="100%" alt="How football conquered the world"></a></td>
+    <td width="25%"><a href="https://github.com/user-attachments/assets/561788b1-5615-4828-b3f8-b24ae5ad7bcd"><img src="assets/thumbs/mexican.jpg" width="100%" alt="Mexican street food"></a></td>
+    <td width="25%"><a href="https://github.com/user-attachments/assets/f69f072f-f50a-41ba-9e66-7ed0aae4ddc0"><img src="assets/thumbs/money.jpg" width="100%" alt="A brief history of money"></a></td>
+    <td width="25%"><a href="https://github.com/user-attachments/assets/b9ff526f-577f-4acb-aafe-a2519a9b7c1c"><img src="assets/thumbs/silicon-valley.jpg" width="100%" alt="A brief history of Silicon Valley"></a></td>
   </tr>
   <tr>
     <td align="center"><sub>Football history · 60s</sub></td>
     <td align="center"><sub>Mexican street food · 60s</sub></td>
     <td align="center"><sub>A brief history of money · 60s</sub></td>
+    <td align="center"><sub>Silicon Valley history · 60s</sub></td>
   </tr>
 </table>
 
@@ -53,6 +55,11 @@ topic
   └─ final.mp4
 ```
 
+That flow is **B-roll** — a topic in, everything generated. Two more input modalities reuse the same engine:
+
+- **A-roll — you already have a talking-head video.** It is ASR-segmented into beats and re-styled into the collage look, keeping the real face, lip-sync and gestures frame-for-frame (`gemini-omni-flash/video-edit`, auto-retrying on `seedance-2.0/reference-to-video`).
+- **C-roll — you have one still photo** (a selfie, a product shot). The subject is cut out as a photographic sticker — never redrawn — and each beat's poster is generated around it (`nano-banana-2/edit`). The narration can be cloned into the subject's own voice.
+
 Two ideas make or break the result, and the skill is built around both:
 
 1. **The look is born in the image step.** Each beat is a finished collage *poster*. All the collage DNA (torn paper, cut-outs, halftone, headline text) lives in that image — if the poster isn't a rich collage, nothing downstream saves it.
@@ -67,7 +74,10 @@ Two human decision gates keep you in control (approve the beat map; pick the sty
 | Keyframe / collage poster | `google/nano-banana-2/text-to-image` |
 | Animate (non-real content) | `google/gemini-omni-flash/image-to-video` |
 | Animate (**real people / brands**) | `kwaivgi/kling-video-o3-pro/image-to-video` |
+| Re-style a talking-head (A-roll) | `google/gemini-omni-flash/video-edit` |
+| Anchor a photo in the collage (C-roll) | `google/nano-banana-2/edit` |
 | Narration | `xai/tts-v1` |
+| Narration in a real person's voice | `bytedance/seed-audio-1.0` (voice cloning) |
 | Music | `minimax/music-2.6` |
 | Cut out an element (advanced path) | `youchuan/v8.1/remove-background` |
 
@@ -123,10 +133,12 @@ assets/               the showcase film
 
 ## Credits
 
+Built by **[@alisaqqt](https://x.com/alisaqqt)** — follow for more agent-skill experiments.
+
 Inspired by the collage-ad workflows of **[Stav Zilber](https://x.com/StavZilber)**, **[rom1trs](https://x.com/rom1trs)** and **[Higgsfield](https://x.com/higgsfield_ai)**, and by **[Vox](https://www.vox.com)**'s explainer visual language.
 
 Built end to end on **[Atlas Cloud](https://www.atlascloud.ai/?utm_source=github&utm_campaign=vox_director)** — one prompt, one film.
 
 ## License
 
-[MIT](LICENSE) © 2026 Atlas Cloud
+[MIT](LICENSE) © 2026 Alisa Qian

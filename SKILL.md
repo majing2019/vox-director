@@ -8,7 +8,7 @@ description: >
   ad built from AI-generated collage posters, a scrapbook-style tribute, or wants to turn
   a topic / product / person into a punchy narrated collage video — even if they don't say
   the word "Vox". Also use when reproducing Stav Zilber / rom1trs / Higgsfield-style collage
-  ad workflows, or when the user asks for a motion collage or a scrapbook-style tribute.
+  ad workflows.
   Three input modalities: a topic (B-roll), a talking-head video (A-roll mode), or a single
   photo of a person/product anchored into the collage (C-roll mode).
   Triggers: "vox video", "collage video", "motion collage", "paper collage
